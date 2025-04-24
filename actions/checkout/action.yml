@@ -1,0 +1,25 @@
+name: 'Checkout'
+description: 'Checkout a git repository'
+inputs:
+  repository:
+    description: 'Repository URL'
+    required: true
+  ref:
+    description: 'The branch, tag or SHA to checkout'
+    required: false
+    default: 'main'
+  path:
+    description: 'Relative path under $GITHUB_WORKSPACE to place the repository'
+    required: false
+    default: '.'
+  depth:
+    description: 'Number of commits to fetch. 0 indicates all history'
+    required: false
+    default: '1'
+  token:
+    description: 'Personal access token (PAT) used to fetch the repository'
+    required: false
+    default: ''
+runs:
+  using: 'python'
+  main: 'action.py'
