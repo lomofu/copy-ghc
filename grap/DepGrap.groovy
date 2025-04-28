@@ -1,8 +1,7 @@
 class DepGrap {
-    // Node class to store both name and closure
     class Node {
-        String name
-        Closure closure
+        final String name
+        final Closure closure
 
         Node(String name, Closure closure) {
             this.name = name
@@ -22,19 +21,16 @@ class DepGrap {
 
         @Override
         String toString() {
-            return name + "(" + closure + ")"
+            return name
         }
     }
 
-    // Map to store dependencies: job name -> set of job names it depends on
-    private Map<String, Set<String>> dependencies = [:]
-    // Map to store nodes (name -> Node)
-    private Map<String, Node> nodes = [:]
+    // Using immutable collections where possible for better thread safety
+    private final Map<String, Set<String>> dependencies = [:].withDefault { [] as Set }
+    private final Map<String, Node> nodes = [:]
 
     /**
      * Add a job with no dependencies
-     * @param name The job name
-     * @param closure The job closure
      */
     void addJob(String name, Closure closure) {
         nodes[name] = new Node(name, closure)
@@ -42,64 +38,71 @@ class DepGrap {
 
     /**
      * Add a dependency between two jobs
-     * @param job The job name that depends on another
-     * @param dependency The job name that is needed
      */
     void addDependency(String job, String dependency) {
-        // Check for self-dependency (cycle)
+        // Self-dependency check
         if (job == dependency) {
-            throw new IllegalArgumentException("Self-dependency detected: job '${job}' cannot depend on itself.")
+            throw new IllegalArgumentException("Self-dependency detected: '$job' cannot depend on itself")
         }
 
-        // Ensure both jobs exist in the nodes map
-        if (!nodes.containsKey(job)) {
-            throw new IllegalArgumentException("Job '${job}' does not exist")
-        }
-        if (!nodes.containsKey(dependency)) {
-            throw new IllegalArgumentException("Job '${dependency}' does not exist")
-        }
+        // Validate both jobs exist
+        [job, dependency].each { checkJobExists(it) }
 
-        // Add to dependencies map
-        if (!dependencies.containsKey(job)) {
-            dependencies[job] = [] as Set
-        }
-        dependencies[job].add(dependency)
+        // Add to dependencies
+        dependencies[job] << dependency
     }
 
     /**
      * Find all jobs that can be executed in parallel, grouped by stages
-     * @return List of sets, each set containing Node objects that can run in parallel
      */
     List<Set<Node>> findParallelJobs() {
-        List<Set<Node>> stages = []
-        Set<String> processedJobs = [] as Set
-        Set<String> allJobNames = nodes.keySet()
+        final List<Set<Node>> stages = []
+        final Set<String> processed = [] as Set
+        final Set<String> allJobs = nodes.keySet()
 
-        // Continue until all jobs are processed
-        while (processedJobs.size() < allJobNames.size()) {
-            // Find jobs with no unprocessed dependencies
-            Set<String> currentStageNames = allJobNames.findAll { job ->
-                // If job has no dependencies, or all its dependencies are already processed
-                !dependencies.containsKey(job) ||
-                        dependencies[job].every { dep -> processedJobs.contains(dep) }
-            } - processedJobs
-
-            if (currentStageNames.isEmpty()) {
-                throw new IllegalStateException("Circular dependency detected or no jobs available to process.")
+        while (processed.size() < allJobs.size()) {
+            // Find all jobs that can run in current stage (with all dependencies satisfied)
+            Set<String> currentStageNames = allJobs.findAll { job ->
+                !processed.contains(job) && // Not yet processed
+                        (dependencies[job].isEmpty() || // No dependencies
+                                dependencies[job].every { processed.contains(it) }) // All deps processed
             }
 
-            // Convert job names to Node objects
-            Set<Node> currentStage = currentStageNames.collect { jobName ->
-                nodes[jobName]
-            } as Set
+            if (currentStageNames.isEmpty()) {
+                throw new IllegalStateException("Circular dependency detected")
+            }
 
-            // Add current stage to result
-            stages.add(currentStage)
-
-            // Mark jobs in this stage as processed
-            processedJobs.addAll(currentStageNames)
+            // Convert names to nodes and add stage
+            stages << currentStageNames.collect { nodes[it] } as Set
+            processed.addAll(currentStageNames)
         }
 
         return stages
+    }
+
+    /**
+     * Execute all jobs in topological order
+     */
+    void execute() {
+        findParallelJobs().eachWithIndex { stage, index ->
+            println "Stage ${index + 1}: ${stage*.name.join(', ')}"
+
+            // In real implementation, you could use GPars or parallel streams here
+            stage.each { Node node ->
+                println "  Running job: ${node.name}"
+                node.closure.call()
+            }
+        }
+    }
+
+    private void checkJobExists(String jobName) {
+        if (!nodes.containsKey(jobName)) {
+            throw new IllegalArgumentException("Job '$jobName' does not exist")
+        }
+    }
+
+    @Override
+    String toString() {
+        "DepGrap(jobs: ${nodes.keySet()}, dependencies: ${dependencies.findAll { !it.value.isEmpty() }})"
     }
 }
