@@ -31,26 +31,15 @@ class GitHubExpressionEvaluator {
             def startPos = matcher.start() + offset
             def endPos = matcher.end() + offset
             
-            // 构造可以由 MarkupTemplateEngine 处理的模板
-            def templateText = """
-            template {
-                yield ${expression}
-            }
-            """
-            
+            // 直接使用 groovy 表达式求值
             try {
-                // 评估表达式
-                def template = engine.createTemplate(templateText)
-                def writable = template.make(context)
-                def sw = new StringWriter()
-                writable.writeTo(sw)
-                def evaluated = sw.toString().trim()
+                def evaluated = evaluateExpression(expression)
                 
                 // 替换原始文本中的表达式
-                result.replace(startPos, endPos, evaluated)
+                result.replace(startPos, endPos, evaluated.toString())
                 
                 // 调整偏移量以适应替换后的文本长度变化
-                offset += (evaluated.length() - fullMatch.length())
+                offset += (evaluated.toString().length() - fullMatch.length())
             } catch (Exception e) {
                 def errorMsg = "Error: ${e.message}"
                 result.replace(startPos, endPos, errorMsg)
@@ -59,6 +48,15 @@ class GitHubExpressionEvaluator {
         }
         
         return result.toString()
+    }
+    
+    private Object evaluateExpression(String expression) {
+        // 创建包含上下文数据的 binding
+        def binding = new Binding(context)
+        
+        // 使用 GroovyShell 直接评估表达式
+        def shell = new GroovyShell(binding)
+        return shell.evaluate(expression)
     }
 }
 
