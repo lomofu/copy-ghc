@@ -1,97 +1,75 @@
-import groovy.text.markup.MarkupTemplateEngine
-import groovy.text.markup.TemplateConfiguration
+import groovy.json.JsonBuilder
+import groovy.json.JsonSlurper
 
-class GitHubExpressionEvaluator {
-    private Map context
-    private MarkupTemplateEngine engine
-    
-    GitHubExpressionEvaluator(Map contextData) {
-        this.context = contextData
-        
-        // 配置 MarkupTemplateEngine
-        def config = new TemplateConfiguration()
-        config.setAutoEscape(false)
-        config.setAutoIndent(false)
-        config.setAutoNewLine(false)
-        
-        this.engine = new MarkupTemplateEngine(this.class.classLoader, config)
+class ExpressionEvaluator {
+    private Binding binding
+
+    ExpressionEvaluator(Map<String, Object> context = [:]) {
+        binding = new Binding(context)
+        // 添加内置函数
+        addBuiltInFunctions()
     }
-    
-    String evaluate(String text) {
-        // 找出所有的 ${{ ... }} 表达式
-        def pattern = ~/\$\{\{\s*(.*?)\s*\}\}/
-        def matcher = pattern.matcher(text)
-        def result = new StringBuilder(text)
-        def offset = 0
-        
-        // 处理每个匹配的表达式
-        while (matcher.find()) {
-            def fullMatch = matcher.group(0)
-            def expression = matcher.group(1)
-            def startPos = matcher.start() + offset
-            def endPos = matcher.end() + offset
-            
-            // 直接使用 groovy 表达式求值
-            try {
-                def evaluated = evaluateExpression(expression)
-                
-                // 替换原始文本中的表达式
-                result.replace(startPos, endPos, evaluated.toString())
-                
-                // 调整偏移量以适应替换后的文本长度变化
-                offset += (evaluated.toString().length() - fullMatch.length())
-            } catch (Exception e) {
-                def errorMsg = "Error: ${e.message}"
-                result.replace(startPos, endPos, errorMsg)
-                offset += (errorMsg.length() - fullMatch.length())
-            }
+
+    private void addBuiltInFunctions() {
+        // 添加一些类似 GitHub Actions 内置函数
+        binding.setVariable("contains", { String str, String search -> str.contains(search) })
+        binding.setVariable("startsWith", { String str, String prefix -> str.startsWith(prefix) })
+        binding.setVariable("endsWith", { String str, String suffix -> str.endsWith(suffix) })
+        binding.setVariable("format", { String format, Object... args -> String.format(format, args) })
+        binding.setVariable("join", { List items, String separator -> items.join(separator) })
+        binding.setVariable("toJSON", { Object obj -> new JsonBuilder(obj).toString() })
+        binding.setVariable("fromJSON", { String json -> new JsonSlurper().parseText(json) })
+    }
+
+    void setVariable(String name, Object value) {
+        binding.setVariable(name, value)
+    }
+
+    Object evaluate(String expression) {
+        // 移除表达式中的 ${{ }} 部分
+        expression = expression.trim()
+        if (expression.startsWith('${{') && expression.endsWith('}}')) {
+            expression = expression[3..-3].trim()
         }
-        
-        return result.toString()
-    }
-    
-    private Object evaluateExpression(String expression) {
-        // 创建包含上下文数据的 binding
-        def binding = new Binding(context)
-        
-        // 使用 GroovyShell 直接评估表达式
+
+        // 解析并执行表达式
         def shell = new GroovyShell(binding)
         return shell.evaluate(expression)
     }
 }
 
-// 示例使用
-def context = [
-    github: [
-        repository: 'user/repo',
-        ref: 'refs/heads/main',
+// 使用示例
+def evaluator = new ExpressionEvaluator()
+
+// 设置上下文变量
+evaluator.setVariable("env", [
+        GITHUB_WORKFLOW: "CI Pipeline",
+        GITHUB_ACTOR: "lomofu"
+])
+evaluator.setVariable("github", [
+        repository: "lomofu/my-repo",
         event: [
-            action: 'push'
+                ref: "refs/heads/main"
         ]
-    ],
-    env: [
-        USERNAME: 'groovy-user',
-        API_TOKEN: 'secret-token'
-    ],
-    vars: [
-        MY_VAR: 'custom-value'
-    ],
-    // 添加一些辅助函数
-    contains: { a, b -> a.toString().contains(b) },
-    startsWith: { a, b -> a.toString().startsWith(b) },
-    endsWith: { a, b -> a.toString().endsWith(b) }
-]
+])
 
-def evaluator = new GitHubExpressionEvaluator(context)
+// 示例1: 取值
+def result1 = evaluator.evaluate('${{ env.GITHUB_WORKFLOW }}')
+println "取值示例: $result1"
 
-// 测试基本表达式
-println "基本表达式测试:"
-println evaluator.evaluate("Repository: \${{ github.repository }}")
-println evaluator.evaluate("Branch: \${{ github.ref }}")
-println evaluator.evaluate("用户: \${{ env.USERNAME }}")
+// 示例2: 函数调用
+def result2 = evaluator.evaluate('${{ contains(github.repository, "lomofu") }}')
+println "函数示例: $result2"
 
-// 测试复杂表达式
-println "\n复杂表达式测试:"
-println evaluator.evaluate("条件判断: \${{ github.repository == 'user/repo' ? 'Yes' : 'No' }}")
-println evaluator.evaluate("函数调用: \${{ contains(github.ref, 'main') ? '主分支' : '其他分支' }}")
-println evaluator.evaluate("字符串操作: \${{ github.repository.toUpperCase() }}")
+// 示例3: 条件判断
+def result3 = evaluator.evaluate('${{ github.event.ref == "refs/heads/main" ? "生产环境" : "测试环境" }}')
+println "条件示例: $result3"
+
+// 示例4: 复杂表达式
+def result4 = evaluator.evaluate('''${{ 
+    env.GITHUB_ACTOR == "lomofu" && 
+    startsWith(github.repository, "lomofu") ? 
+    format("欢迎 %s!", env.GITHUB_ACTOR) : 
+    "访问受限" 
+}}''')
+println "复杂表达式: $result4"
