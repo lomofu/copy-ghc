@@ -25,14 +25,50 @@ class ExpressionEvaluator {
         binding.setVariable(name, value)
     }
 
-    Object evaluate(String expression) {
-        // 移除表达式中的 ${{ }} 部分
-        expression = expression.trim()
-        if (expression.startsWith('${{') && expression.endsWith('}}')) {
-            expression = expression[3..-3].trim()
+    Object evaluate(String input) {
+        // Regular expression to find ${{ ... }} patterns
+        def pattern = /\$\{\{(.*?)\}\}/
+        def matcher = input =~ pattern
+
+        // If no placeholders found, return the original string
+        if (!matcher.find()) {
+            return input
         }
 
-        // 解析并执行表达式
+        // Reset matcher to start from beginning
+        matcher.reset()
+
+        // StringBuilder for the result
+        StringBuilder result = new StringBuilder(input)
+
+        // Track offset as we replace parts of the string
+        int offset = 0
+
+        // Process each placeholder
+        while (matcher.find()) {
+            // Get the full match and the expression inside
+            String fullMatch = matcher.group(0)
+            String expression = matcher.group(1).trim()
+
+            // Position in the original string
+            int start = matcher.start() + offset
+            int end = matcher.end() + offset
+
+            // Evaluate the expression
+            def value = evaluateExpression(expression)
+
+            // Replace the placeholder with the evaluated result
+            result.replace(start, end, value.toString())
+
+            // Update offset for next replacement
+            offset += value.toString().length() - fullMatch.length()
+        }
+
+        return result.toString()
+    }
+
+// Helper method to evaluate a single expression
+    private Object evaluateExpression(String expression) {
         def shell = new GroovyShell(binding)
         return shell.evaluate(expression)
     }
@@ -44,32 +80,15 @@ def evaluator = new ExpressionEvaluator()
 // 设置上下文变量
 evaluator.setVariable("env", [
         GITHUB_WORKFLOW: "CI Pipeline",
-        GITHUB_ACTOR: "lomofu"
+        GITHUB_ACTOR   : "lomofu"
 ])
 evaluator.setVariable("github", [
         repository: "lomofu/my-repo",
-        event: [
+        event     : [
                 ref: "refs/heads/main"
         ]
 ])
 
 // 示例1: 取值
-def result1 = evaluator.evaluate('${{ env.GITHUB_WORKFLOW }}')
+def result1 = evaluator.evaluate('echo for ${{ env.GITHUB_WORKFLOW }}')
 println "取值示例: $result1"
-
-// 示例2: 函数调用
-def result2 = evaluator.evaluate('${{ contains(github.repository, "lomofu") }}')
-println "函数示例: $result2"
-
-// 示例3: 条件判断
-def result3 = evaluator.evaluate('${{ github.event.ref == "refs/heads/main" ? "生产环境" : "测试环境" }}')
-println "条件示例: $result3"
-
-// 示例4: 复杂表达式
-def result4 = evaluator.evaluate('''${{ 
-    env.GITHUB_ACTOR == "lomofu" && 
-    startsWith(github.repository, "lomofu") ? 
-    format("欢迎 %s!", env.GITHUB_ACTOR) : 
-    "访问受限" 
-}}''')
-println "复杂表达式: $result4"
